@@ -39,7 +39,8 @@ Engine_Spectrals : CroneEngine {
   // Arrays of filters
   var filterBankAList;
   var filterBankBList;
-  var envList;
+  var envList;    //shaping envelope
+  var ampEnvList; //monitors level for each band
   var extOutList;
 
   var inBus; //Bus input for everything 
@@ -67,12 +68,13 @@ Engine_Spectrals : CroneEngine {
 	alloc {
 		pg = ParGroup.tail(context.xg);
 
-    barkScale = Array[60, 150, 250, 350, 500, 630, 800, 1000, 1320, 1600, 2050, 2600, 3500, 5000, 8000, 12500];
+    barkScale = Array[60, 150, 250, 350, 500, 630, 800, 1000, 1320, 1600, 2050, 2600, 3500, 5050, 8000, 12500];
     currScale = barkScale;
 
     filterBankAList    = List.new(16);
     filterBankBList    = List.new(16);
     envList            = List.new(16);
+    ampEnvList         = List.new(16);
     extOutList         = List.new(16);
 
     inBus     = Bus.audio(context.server, 2);
@@ -110,14 +112,15 @@ Engine_Spectrals : CroneEngine {
 
     SynthDef(\NoiseIn, { 
       arg out;
-      Out.ar(out,PinkNoise.ar(0.007, 0.0007));
+      Out.ar(out,PinkNoise.ar(0.007, 0.007));
     }).add;
 
     // Reads stereo in to bus
     // toggleable
     SynthDef(\ExternalIn, { 
       arg out;
-      Out.ar(out,In.ar(context.in_b, 2));
+      Out.ar(context.out_b,In.ar(context.in_b[0].index, 2));
+//      Out.ar(out,WhiteNoise.ar(0.008, 0.008));
     }).add;
 
     //reads N busses to stereo
@@ -136,7 +139,7 @@ Engine_Spectrals : CroneEngine {
     ]);
 
     // Enable with toggle
-    externalIn = Synth(\ExternalIn, [
+    externalIn = Synth.after(pinkNoise, \ExternalIn, [
       \out, noBus
     ]);
     
@@ -144,7 +147,7 @@ Engine_Spectrals : CroneEngine {
     barkScale.do({ arg freq, i;
       var filter, ampEnv, envelope, extOut;
 
-      filter = Synth(\Spectral, [
+      filter = Synth.after(externalIn, \Spectral, [
         \in, inBus,
         \out, outBus[i],
         \amp_bus, ampInBus[i],
@@ -153,7 +156,7 @@ Engine_Spectrals : CroneEngine {
         \amp,amp,
         \attack, attack,
         \release,release
-      ], target:pg);
+      ]);
 
       envelope = Synth.after(filter, \SpectralEnv, [
         \in, envInBus[i],
@@ -176,6 +179,7 @@ Engine_Spectrals : CroneEngine {
       ]);
 
       filterBankAList.add(filter);
+      ampEnvList.add(ampEnv);
       envList.add(envelope);
       extOutList.add(extOut);
     });
@@ -300,6 +304,7 @@ Engine_Spectrals : CroneEngine {
 	free {
     filterBankAList.do({arg item, i; item.free});
     envList.do({arg item, i; item.free});
+    ampEnvList.do({arg item, i; item.free});
     extOutList.do({arg item, i; item.free});
 	}
 }
