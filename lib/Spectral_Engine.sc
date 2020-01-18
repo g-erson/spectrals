@@ -28,7 +28,7 @@
 Engine_Spectrals : CroneEngine {
   var pg;
   var amp=0.3;
-  var ring=1; //specifies the Q resonance
+  var ring=8; //specifies the Q resonance
   var attack=0.4;
   var sustain=1;
   var release=1;
@@ -119,8 +119,7 @@ Engine_Spectrals : CroneEngine {
     // toggleable
     SynthDef(\ExternalIn, { 
       arg out;
-      Out.ar(context.out_b,In.ar(context.in_b[0].index, 2));
-//      Out.ar(out,WhiteNoise.ar(0.008, 0.008));
+      Out.ar(out,SoundIn.ar([0, 1]));
     }).add;
 
     //reads N busses to stereo
