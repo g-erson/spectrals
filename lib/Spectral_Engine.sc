@@ -119,13 +119,13 @@ Engine_Spectrals : CroneEngine {
     // toggleable
     SynthDef(\ExternalIn, { 
       arg out;
-      Out.ar(out,SoundIn.ar([0, 1]));
+      Out.ar(out,Mix.new(SoundIn.ar([0, 1])));
     }).add;
 
     //reads N busses to stereo
     SynthDef(\ExternalOut, { 
-      arg in, out;
-      Out.ar(out,In.ar(in).dup);
+      arg in, out, amp;
+      Out.ar(out,In.ar(in).dup * amp);
     }).add;
 
     context.server.sync; // Wait for all the SynthDefs to be added on the server
@@ -148,18 +148,18 @@ Engine_Spectrals : CroneEngine {
 
       filter = Synth.after(externalIn, \Spectral, [
         \in, inBus,
-        \out, outBus[i],
-        \amp_bus, ampInBus[i],
+        \out, envInBus[i],
+        \amp_bus, noBus,
         \freq,freq,
         \ring, ring,
-        \amp,amp,
+        \amp,0.3,
         \attack, attack,
         \release,release
       ]);
 
       envelope = Synth.after(filter, \SpectralEnv, [
         \in, envInBus[i],
-        \out, context.out_b,
+        \out,  outBus[i],
         \amp_bus, ampInBus[i],
         \attack, attack,
         \sustain, sustain,
@@ -174,7 +174,8 @@ Engine_Spectrals : CroneEngine {
 
       extOut = Synth.after(envelope, \ExternalOut, [
         \in, outBus[i],
-        \out, context.out_b
+        \out, context.out_b,
+        \amp, amp
       ]);
 
       filterBankAList.add(filter);
@@ -209,7 +210,7 @@ Engine_Spectrals : CroneEngine {
     //id of bus
     this.addCommand("getBusAmp", "f", {
       arg msg;
-      postln("BUS" + msg[1] + ampOutBus[msg[1]].getSynchronous);
+      postln("BUS: " + msg[1] + "VAL: " + ampOutBus[msg[1]].getSynchronous);
     });
 
 		this.addCommand("toggleBank", "f", {
@@ -224,7 +225,7 @@ Engine_Spectrals : CroneEngine {
     // Toggles Envelopes on each band on and off
 		this.addCommand("toggleEnv", "f", {
       var outSignal;
-      if( toggleEnv == 1, {
+      if( toggleEnv == 0, {
         filterBankAList.do({ arg filter, i; 
           filter.set(\out, envInBus[i]);
           filter.set(\amp_bus, noBus);
@@ -268,6 +269,14 @@ Engine_Spectrals : CroneEngine {
 			amp = msg[2];
       
       filterBankAList[id].set(\amp, amp);
+		});
+
+		this.addCommand("ampAll", "f", { arg msg;
+      var id;
+      extOutList.do({arg item, i;
+        item.set(\amp, msg[1]);
+      });
+
 		});
 
     // Q 
