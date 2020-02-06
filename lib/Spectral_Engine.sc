@@ -27,8 +27,8 @@
 
 Engine_Spectrals : CroneEngine {
   var pg;
-  var amp=0.3;
-  var ring=8; //specifies the Q resonance
+  var amp=0.009; //Overall gain
+  var ring=0.2; //specifies the Q resonance
   var attack=0.4;
   var sustain=1;
   var release=1;
@@ -37,20 +37,37 @@ Engine_Spectrals : CroneEngine {
   var toggleBank=\A; // A or B
 
   // Arrays of filters
-  var filterBankAList;
-  var filterBankBList;
-  var envList;    //shaping envelope
-  var ampEnvList; //monitors level for each band
-  var extOutList;
+  var filterBankListA;
+  var filterBankListB;
+  var envListA;    //shaping envelope
+  var envListB;    //shaping envelope
+  var ampEnvListA; //monitors level for each band
+  var ampEnvListB; //monitors level for each band
+  var extOutListA;
+  var extOutListB;
 
-  var inBus; //Bus input for everything 
-  var outBus; //16 bus out for everything 
+  var inBusA; //Bus input for everything 
+  var inBusB; //Bus input for everything 
+
+  // separate busses so we can split signal L+R to both, 
+  // or L to one, R to other for spectral transfer
+
+  var outBusA; //16 bus out for everything 
+  var outBusB; //16 bus out for everything 
+  // Separate busses to each ExternalOut synth for A/B morph
+
   var noBus; //routed nowhere
-  var envInBus; // optional envelope on spectral
-  var envOutBus;
+  var envInBusA; // optional envelope on spectral
+  var envInBusB; // optional envelope on spectral
+//  var envOutABus;
 
-  var ampInBus; //amplitude of given spectral
-  var ampOutBus; 
+  var ampInBusA; //amplitude of given spectral
+  var ampInBusB; //amplitude of given spectral
+
+  var ampOutBusA; 
+  var ampOutBusB; 
+
+  var ampControlBus; //controls amplitude of spectral
 
   var lfoBus;
   var fxBus;
@@ -58,6 +75,7 @@ Engine_Spectrals : CroneEngine {
   var barkScale;
   var currScale;
   var pinkNoise; //Pink Noise Input Synth
+  var dusty; //Dust Input Synth
   var externalIn; //External Input Synth
 
 	*new { arg context, doneCallback;
@@ -68,32 +86,45 @@ Engine_Spectrals : CroneEngine {
 	alloc {
 		pg = ParGroup.tail(context.xg);
 
-    barkScale = Array[60, 150, 250, 350, 500, 630, 800, 1000, 1320, 1600, 2050, 2600, 3500, 5050, 8000, 12500];
+    barkScale = Array[90, 150, 240, 350, 500, 700, 840, 1000, 1170, 1370, 1600, 1850, 2150, 2900, 4000, 5800, 8500];
     currScale = barkScale;
 
-    filterBankAList    = List.new(16);
-    filterBankBList    = List.new(16);
-    envList            = List.new(16);
-    ampEnvList         = List.new(16);
-    extOutList         = List.new(16);
+    filterBankListA    = List.new(16);
+    filterBankListB    = List.new(16);
+    envListA            = List.new(16);
+    envListB            = List.new(16);
+    ampEnvListA         = List.new(16);
+    ampEnvListB         = List.new(16);
+    extOutListA         = List.new(16);
+    extOutListB         = List.new(16);
 
-    inBus     = Bus.audio(context.server, 2);
-    outBus    = currScale.collect{ Bus.audio(context.server) };
+    inBusA     = Bus.audio(context.server, 2);
+    inBusB     = Bus.audio(context.server, 2);
 
-    ampInBus  = currScale.collect{ Bus.audio(context.server) };
-    ampOutBus = currScale.collect{ Bus.control(context.server) };
+    outBusA    = currScale.collect{ Bus.audio(context.server) };
+    outBusB    = currScale.collect{ Bus.audio(context.server) };
 
-    envInBus  = currScale.collect{ Bus.audio(context.server) };
+    ampInBusA  = currScale.collect{ Bus.audio(context.server) };
+    ampInBusB  = currScale.collect{ Bus.audio(context.server) };
+    ampOutBusA = currScale.collect{ Bus.control(context.server) };
+    ampOutBusB = currScale.collect{ Bus.control(context.server) };
+
+    envInBusA  = currScale.collect{ Bus.audio(context.server) };
+    envInBusB  = currScale.collect{ Bus.audio(context.server) };
 
     //Goes Nowhere
     noBus = Bus.audio(context.server,1);
 
+    ampControlBus = Bus.control(context.server,1);
+    ampControlBus.set(0.3);
+
     SynthDef(\Spectral, {
       arg in, out, amp_bus, freq = 440, ring=ring, amp;
-      var inSignal = In.ar(in,2);
+      var inSignal = In.ar(in);
 
       var snd = DynKlank.ar(`[[freq], nil, [ring]], inSignal);
-      var outSignal = (snd * amp);
+      var outSignal = (snd * In.kr(amp));
+//      var outSignal = (snd * amp);
       
       Out.ar(amp_bus, outSignal);
       Out.ar(out, outSignal);
@@ -101,10 +132,14 @@ Engine_Spectrals : CroneEngine {
     }).add;
 
     SynthDef(\SpectralEnv, {
-      arg in, out, amp_bus, gate, attack=attack, sustain=sustain, release=release;
+      arg in, out, amp_bus, gate, attack=attack, sustain=sustain, release=release, amp=1;
       var inSignal = In.ar(in);
 
-      var outSignal = EnvGen.kr(Env.asr(attackTime: attack, releaseTime: release, sustainLevel: sustain), gate) * inSignal;
+      var outSignal = EnvGen.kr(Env.asr(
+        attackTime: attack,
+        releaseTime: release,
+        sustainLevel: sustain
+      ), gate) * inSignal * amp;
 
       Out.ar(amp_bus, outSignal);
       Out.ar(out, outSignal.dup);
@@ -115,11 +150,24 @@ Engine_Spectrals : CroneEngine {
       Out.ar(out,PinkNoise.ar(0.007, 0.007));
     }).add;
 
+    SynthDef(\DustIn, { 
+      arg out;
+      Out.ar(out,Dust.ar(4, 0.5));
+    }).add;
+
     // Reads stereo in to bus
     // toggleable
     SynthDef(\ExternalIn, { 
       arg out;
       Out.ar(out,Mix.new(SoundIn.ar([0, 1])));
+    }).add;
+
+    // Split stereo to different
+    // busses
+    SynthDef(\ExternalInSplit, { 
+      arg out, out1;
+      Out.ar(out,SoundIn.ar(0));
+      Out.ar(out1,SoundIn.ar(1));
     }).add;
 
     //reads N busses to stereo
@@ -133,34 +181,36 @@ Engine_Spectrals : CroneEngine {
 		postln("Spectral: initPolls");
 
     // Default send pinkNoise
-    pinkNoise = Synth(\NoiseIn, [
-      \out, inBus
+    dusty = Synth(\DustIn, [
+      \out, inBusB
+    ]);
+
+    pinkNoise = Synth.after(dusty, \NoiseIn, [
+      \out, inBusA //noBus
     ]);
 
     // Enable with toggle
     externalIn = Synth.after(pinkNoise, \ExternalIn, [
       \out, noBus
     ]);
-    
-    // for each frequency in scale
+
+    // Set up Bank B first so it can modulate A
     barkScale.do({ arg freq, i;
       var filter, ampEnv, envelope, extOut;
 
       filter = Synth.after(externalIn, \Spectral, [
-        \in, inBus,
-        \out, envInBus[i],
+        \in, inBusB,
+        \out, envInBusB[i],// context.out_b, //envInBusB[i],
         \amp_bus, noBus,
         \freq,freq,
         \ring, ring,
-        \amp,0.3,
-        \attack, attack,
-        \release,release
+        \amp,ampControlBus,
       ]);
 
       envelope = Synth.after(filter, \SpectralEnv, [
-        \in, envInBus[i],
-        \out,  outBus[i],
-        \amp_bus, ampInBus[i],
+        \in, envInBusB[i],
+        \out,  outBusB[i],
+        \amp_bus, ampInBusB[i],
         \attack, attack,
         \sustain, sustain,
         \release, release,
@@ -168,23 +218,64 @@ Engine_Spectrals : CroneEngine {
       ]);
 
 			ampEnv = Synth.after(envelope, \amp_env, [
-				\in, ampInBus[i],
-        \out, ampOutBus[i] 
+				\in, ampInBusB[i],
+        \out, ampOutBusB[i] 
       ]);
 
       extOut = Synth.after(envelope, \ExternalOut, [
-        \in, outBus[i],
-        \out, context.out_b,
+        \in, outBusB[i],
+        \out, noBus, 
         \amp, amp
       ]);
 
-      filterBankAList.add(filter);
-      ampEnvList.add(ampEnv);
-      envList.add(envelope);
-      extOutList.add(extOut);
+      filterBankListB.add(filter);
+      ampEnvListB.add(ampEnv);
+      envListB.add(envelope);
+      extOutListB.add(extOut);
+    });
+    
+    // Set up Bank A
+    barkScale.do({ arg freq, i;
+      var filter, ampEnv, envelope, extOut;
+
+      filter = Synth.after(extOutListB[extOutListB.size - 1], \Spectral, [
+        \in, inBusA,
+        \out, envInBusA[i],
+        \amp_bus, noBus,
+        \freq,freq,
+        \ring, ring,
+        \amp, ampOutBusB[i],
+      ]);
+
+      envelope = Synth.after(filter, \SpectralEnv, [
+        \in, envInBusA[i],
+        \out,  outBusA[i],
+        \amp_bus, ampInBusA[i],
+        \attack, attack,
+        \sustain, sustain,
+        \release, release,
+        \gate, 0
+      ]);
+
+			ampEnv = Synth.after(envelope, \amp_env, [
+				\in, ampInBusA[i],
+        \out, ampOutBusA[i] 
+      ]);
+
+      extOut = Synth.after(envelope, \ExternalOut, [
+        \in, outBusA[i],
+        \out, context.out_b,
+        \amp, amp 
+      ]);
+
+      filterBankListA.add(filter);
+      ampEnvListA.add(ampEnv);
+      envListA.add(envelope);
+      extOutListA.add(extOut);
     });
 
-    ampOutBus.do({arg bus, i;
+
+    ampOutBusA.do({arg bus, i;
       context.registerPoll("band_amp_out_"++i, {bus.getSynchronous;});
     });
 
@@ -197,20 +288,46 @@ Engine_Spectrals : CroneEngine {
     this.addCommand("noteOn", "f", {
       arg msg;
       //Should only work with envelopes on!
-      envList[msg[1]].set(\gate, 1);
+      envListA[msg[1]].set(\gate, 1);
+      envListB[msg[1]].set(\gate, 1);
     });
 
     //id
     this.addCommand("noteOff", "f", {
       arg msg;
       //Should only work with envelopes on!
-      envList[msg[1]].set(\gate, 0);
+      envListA[msg[1]].set(\gate, 0);
+      envListB[msg[1]].set(\gate, 0);
+    });
+
+		this.addCommand("dustFreq", "f", { arg msg;
+      dusty.set(\freq, msg[1]);
+		});
+
+		this.addCommand("dustOn", "f", { arg msg;
+      dusty.set(\out, inBusB);
+		});
+
+		this.addCommand("dustOff", "f", { arg msg;
+      dusty.set(\out, noBus);
+		});
+
+    //id of bus
+    this.addCommand("getBusAmpControl", "f", {
+      arg msg;
+      postln("AMP CTRL BUS: " + ampControlBus + "VAL: " + ampControlBus.getSynchronous);
     });
 
     //id of bus
-    this.addCommand("getBusAmp", "f", {
+    this.addCommand("getBusAmpA", "f", {
       arg msg;
-      postln("BUS: " + msg[1] + "VAL: " + ampOutBus[msg[1]].getSynchronous);
+      postln("BUS A: " + msg[1] + "VAL: " + ampOutBusA[msg[1]].getSynchronous);
+    });
+
+    //id of bus
+    this.addCommand("getBusAmpB", "f", {
+      arg msg;
+      postln("BUS B: " + msg[1] + "VAL: " + ampOutBusB[msg[1]].getSynchronous);
     });
 
 		this.addCommand("toggleBank", "f", {
@@ -226,23 +343,23 @@ Engine_Spectrals : CroneEngine {
 		this.addCommand("toggleEnv", "f", {
       var outSignal;
       if( toggleEnv == 0, {
-        filterBankAList.do({ arg filter, i; 
-          filter.set(\out, envInBus[i]);
+        filterBankListA.do({ arg filter, i; 
+          filter.set(\out, envInBusA[i]);
           filter.set(\amp_bus, noBus);
         });
 
-        envList.do({arg env, i;
-          env.set(\amp_bus, ampInBus[i]);
+        envListA.do({arg env, i;
+          env.set(\amp_bus, ampInBusA[i]);
         });
 
         toggleEnv = 0;
       }, {
-        filterBankAList.do({ arg filter, i; 
-          filter.set(\out, outBus[i]);
-          filter.set(\amp_bus, ampInBus[i]);
+        filterBankListA.do({ arg filter, i; 
+          filter.set(\out, outBusA[i]);
+          filter.set(\amp_bus, ampInBusA[i]);
         });
 
-        envList.do({arg env, i;
+        envListA.do({arg env, i;
           env.set(\amp_bus, noBus);
         });
         toggleEnv = 1;
@@ -253,11 +370,11 @@ Engine_Spectrals : CroneEngine {
 		this.addCommand("toggleInput", "f", {
       if( toggleIn == 1, {
         pinkNoise.set(\out, noBus);
-        externalIn.set(\out,inBus);
+        externalIn.set(\out,inBusA);
         toggleIn = 0;
       }, {
         externalIn.set(\out,noBus);
-        pinkNoise.set(\out, inBus);
+        pinkNoise.set(\out, inBusA);
         toggleIn = 1;
       })
 		});
@@ -268,51 +385,56 @@ Engine_Spectrals : CroneEngine {
       id = msg[1];
 			amp = msg[2];
       
-      filterBankAList[id].set(\amp, amp);
+      filterBankListA[id].set(\amp, amp);
 		});
 
 		this.addCommand("ampAll", "f", { arg msg;
       var id;
-      extOutList.do({arg item, i;
+      extOutListA.do({arg item, i;
         item.set(\amp, msg[1]);
       });
-
+      extOutListB.do({arg item, i;
+        item.set(\amp, msg[1]);
+      });
 		});
 
     // Q 
 		this.addCommand("ring", "f", { arg msg;
 			ring = msg[1];
-      filterBankAList.do({ arg item, i; 
+      filterBankListA.do({ arg item, i; 
+        item.set(\ring, ring);
+      });
+      filterBankListB.do({ arg item, i; 
         item.set(\ring, ring);
       });
 		});
 
 		this.addCommand("attack", "f", { arg msg;
 			attack = msg[1];
-      envList.do({arg item, i;
+      envListA.do({arg item, i;
         item.set(\attack, attack);
       });
 		});
 
 		this.addCommand("sustain", "f", { arg msg;
 			sustain = msg[1];
-      envList.do({arg item, i;
+      envListA.do({arg item, i;
         item.set(\sustain, sustain);
       });
 		});
 
 		this.addCommand("release", "f", { arg msg;
 			release = msg[1];
-      envList.do({arg item, i;
+      envListA.do({arg item, i;
         item.set(\release, release);
       });
 		});
 	}
 
 	free {
-    filterBankAList.do({arg item, i; item.free});
-    envList.do({arg item, i; item.free});
-    ampEnvList.do({arg item, i; item.free});
-    extOutList.do({arg item, i; item.free});
+    filterBankListA.do({arg item, i; item.free});
+    envListA.do({arg item, i; item.free});
+    ampEnvListA.do({arg item, i; item.free});
+    extOutListA.do({arg item, i; item.free});
 	}
 }
